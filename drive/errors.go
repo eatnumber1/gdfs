@@ -13,7 +13,6 @@ type driveError struct {
 }
 
 const (
-	NOT_FOUND DriveErrorCode = iota
 	BANNED_MIME DriveErrorCode = iota
 )
 

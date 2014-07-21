@@ -2,9 +2,10 @@ package gdfs
 
 import (
 	"log"
-	"time"
 	"fmt"
 	"os"
+	"io/ioutil"
+	"net/http"
 
 	"github.com/eatnumber1/gdfs/drive"
 	"github.com/eatnumber1/gdfs/util"
@@ -14,13 +15,8 @@ import (
 	fusefs "bazil.org/fuse/fs"
 )
 
-var _ = log.Printf
-var _ = time.Unix
-var _ = fmt.Sprintf
-var _ = util.WithHere
-
 const (
-	// TODO: Get rid of this
+	// TODO: Get rid of these
 	OWNER uint32 = 168633
 )
 
@@ -34,8 +30,8 @@ type DriveFileSystem struct {
 	drive *drive.Drive
 }
 
-func NewDriveFileSystem(svc *gdrive.Service) (*DriveFileSystem, error) {
-	drive, err := drive.NewDrive(svc)
+func NewDriveFileSystem(svc *gdrive.Service, client *http.Client) (*DriveFileSystem, error) {
+	drive, err := drive.NewDrive(svc, client)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +214,27 @@ func (this *Node) Lookup(name string, intr fusefs.Intr) (fusefs.Node, fuse.Error
 	}
 
 	return NewNode(file)
+}
+
+// TODO: Support partial reads
+func (this *Node) ReadAll(intr fusefs.Intr) (body []byte, err fuse.Error) {
+	fd, err := this.file.Open()
+	if err != nil {
+		return
+	}
+	defer func() {
+		e := fd.Close()
+		if err != nil {
+			err = e
+		}
+	}()
+
+	body, err = ioutil.ReadAll(fd)
+	if err != nil {
+		body = nil
+		return
+	}
+	return
 }
 
 /*

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"syscall"
+	"io"
 
 	gdrive "code.google.com/p/google-api-go-client/drive/v2"
 
@@ -247,4 +248,25 @@ func (this *File) ChildByName(name string) (*File, error) {
 
 func (this *File) Name() (string, error) {
 	return this.file.Title, nil
+}
+
+type OpenFile io.ReadCloser
+
+func (this *File) Open() (OpenFile, error) {
+	log.Printf("Fetching url %s\n", this.file.DownloadUrl)
+	resp, err := this.drive.client.Get(this.file.DownloadUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	switch resp.StatusCode {
+	case 200:
+	case 404:
+		return nil, fuse.ENOENT
+	default:
+		log.Printf("Http error %d: %s\n", resp.StatusCode, resp.Status)
+		return nil, fuse.EIO
+	}
+
+	return resp.Body, nil
 }

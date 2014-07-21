@@ -81,7 +81,7 @@ func main() {
 		log.Fatalf("An error occurred creating Drive client: %v\n", err)
 	}
 
-	gdfs, err := gdfs.NewDriveFileSystem(svc)
+	gdfs, err := gdfs.NewDriveFileSystem(svc, transport.Client())
 	if err != nil {
 		log.Fatalf("Cannot construct Drive file system: %v\n", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sort"
 	"log"
+	"net/http"
 
 	"github.com/eatnumber1/gdfs/util"
 
@@ -20,9 +21,10 @@ var _ = util.WithHere
 type Drive struct {
 	*gdrive.Service
 	About *gdrive.About
+	client *http.Client
 }
 
-func NewDrive(svc *gdrive.Service) (*Drive, error) {
+func NewDrive(svc *gdrive.Service, client *http.Client) (*Drive, error) {
 	about, err := svc.About.Get().Do()
 	if err != nil {
 		return nil, err
@@ -31,11 +33,12 @@ func NewDrive(svc *gdrive.Service) (*Drive, error) {
 	return &Drive{
 		Service: svc,
 		About: about,
+		client: client,
 	}, nil
 }
 
 func (this *Drive) Root() (*File, error) {
-	return NewFileFromId(this, "root")
+	return NewFileFromId(this, this.About.RootFolderId)
 }
 
 /*
