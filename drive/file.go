@@ -4,10 +4,12 @@ import (
 	"time"
 	"fmt"
 	"log"
+	"os"
+	"syscall"
 
 	gdrive "code.google.com/p/google-api-go-client/drive/v2"
 
-	"github.com/hanwen/go-fuse/fuse"
+	fuse "bazil.org/fuse"
 )
 
 const (
@@ -16,9 +18,9 @@ const (
 )
 
 const (
-	R_OK = 4
-	W_OK = 2
-	X_OK = 1
+	R_OK os.FileMode = 4
+	W_OK os.FileMode = 2
+	X_OK os.FileMode = 1
 )
 
 // TODO: Support partial requests and responses
@@ -28,13 +30,15 @@ type File struct {
 	drive *Drive
 }
 
-func NewFileFromPath(drive *Drive, path string) (*File, error) {
+func NewFileFromId(drive *Drive, id string) (*File, error) {
+	/*
 	fileId, err := drive.FilePathToId(path)
 	if err != nil {
 		return nil, err
 	}
+	*/
 
-	file, err := drive.Files.Get(fileId).Do()
+	file, err := drive.Files.Get(id).Do()
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +66,7 @@ func (this *File) Inode() uint64 {
 	return inode
 }
 
-func drivePermToFsPerm(perm *gdrive.Permission) (mode uint32) {
+func drivePermToFsPerm(perm *gdrive.Permission) (mode os.FileMode) {
 	mode = 0
 	switch perm.Role {
 	case "owner":
@@ -85,30 +89,42 @@ func drivePermToFsPerm(perm *gdrive.Permission) (mode uint32) {
 		fallthrough
 	case "group":
 		// TODO: Map domain and group to ACLs
-		mode = 0
 	default:
 		panic(fmt.Sprintf("Unknown permission type \"%v\"", perm.Type))
 	}
 
-	mode = mode | (mode << 3) | (mode << 6)
 	log.Printf("mode = %b\n", mode)
 	return
 }
 
-func mimeToType(mime string) (mode uint32, err error) {
+func mimeToType(mime string) (mode os.FileMode, err error) {
 	switch mime {
 	case "application/vnd.google-apps.folder":
-		mode = fuse.S_IFREG
-	case "application/vnd.google-apps.file":
-		mode = fuse.S_IFDIR
-	default:
-		err = NewDriveError(fmt.Sprintf("Unknown mime type \"%s\"", mime), UNKNOWN_MIME)
+		mode = os.ModeDir
+	case "application/vnd.google-apps.document":
+		fallthrough
+	case "application/vnd.google-apps.drawing":
+		fallthrough
+	case "application/vnd.google-apps.form":
+		fallthrough
+	case "application/vnd.google-apps.fusiontable":
+		fallthrough
+	case "application/vnd.google-apps.presentation":
+		fallthrough
+	case "application/vnd.google-apps.sites":
+		fallthrough
+	case "application/vnd.google-apps.script":
+		fallthrough
+	case "application/vnd.google-apps.spreadsheet":
+		err = NewDriveError(fmt.Sprintf("Banned mime type \"%s\"", mime), BANNED_MIME)
 		return
+	default:
+		// Empty
 	}
 	return
 }
 
-func (this *File) Mode() (mode uint32, err error) {
+func (this *File) Mode() (mode os.FileMode, err error) {
 	// TODO: Map the file owner to a uid/gid
 	mode, err = mimeToType(this.file.MimeType)
 	if err != nil {
@@ -157,8 +173,78 @@ func (this *File) Mtime() (modified time.Time, err error) {
 }
 
 func (this *File) Ctime() (created time.Time, err error) {
+	return this.Mtime()
+}
+
+func (this *File) Crtime() (created time.Time, err error) {
 	if this.file.CreatedDate == "" {
 		return
 	}
 	return time.Parse(time.RFC3339, this.file.CreatedDate)
+}
+
+func (this *File) Children() ([]*File, error) {
+	isDir, err := this.IsDirectory()
+	if err != nil {
+		return nil, err
+	}
+	if !isDir {
+		return nil, fuse.Errno(syscall.ENOTDIR)
+	}
+
+	call := this.drive.Files.List()
+	// TODO: This is an injection!
+	call.Q(fmt.Sprintf("'%s' in parents", this.file.Id))
+	children, err := call.Do()
+	if err != nil {
+		return nil, err
+	}
+
+	dirs := make([]*File, len(children.Items))
+
+	for idx := range children.Items {
+		dirs[idx] = NewFile(this.drive, children.Items[idx])
+	}
+
+	return dirs, nil
+}
+
+func (this *File) IsDirectory() (ret bool, err error) {
+	mode, err := this.Mode()
+	if err != nil {
+		return
+	}
+
+	ret = mode & os.ModeDir != 0
+	return
+}
+
+func (this *File) ChildByName(name string) (*File, error) {
+	isDir, err := this.IsDirectory()
+	if err != nil {
+		return nil, err
+	}
+	if !isDir {
+		return nil, fuse.Errno(syscall.ENOTDIR)
+	}
+
+	call := this.drive.Files.List()
+	// TODO: This is an injection!
+	call.Q(fmt.Sprintf("'%s' in parents and title = '%s'", this.file.Id, name))
+	children, err := call.Do()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(children.Items) > 1 {
+		panic("Multiple files with the same name!")
+	} else if len(children.Items) == 0 {
+		return nil, fuse.ENOENT
+	}
+
+	return NewFile(this.drive, children.Items[0]), nil
+}
+
+func (this *File) Name() (string, error) {
+	return this.file.Title, nil
 }

@@ -5,11 +5,13 @@ import (
 	"log"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/eatnumber1/gdfs/fs"
 
-	"github.com/hanwen/go-fuse/fuse/nodefs"
-	"github.com/hanwen/go-fuse/fuse/pathfs"
+	"bazil.org/fuse"
+	fusefs "bazil.org/fuse/fs"
+	_ "bazil.org/fuse/fs/fstestutil"
 
 	"code.google.com/p/google-api-go-client/drive/v2"
 	"code.google.com/p/goauth2/oauth"
@@ -31,7 +33,17 @@ var config = &oauth.Config{
 }
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%s [options] MOUNTPOINT\n", os.Args[0])
+		flag.PrintDefaults()
+	}
 	flag.Parse()
+
+	if flag.NArg() != 1 {
+		flag.Usage()
+		os.Exit(2)
+	}
+	mountpoint := flag.Arg(0)
 
 	transport := &oauth.Transport{
 		Config: config,
@@ -69,15 +81,24 @@ func main() {
 		log.Fatalf("An error occurred creating Drive client: %v\n", err)
 	}
 
-	gdfs, err := gdfs.NewGdfs(pathfs.NewDefaultFileSystem(), svc)
+	gdfs, err := gdfs.NewDriveFileSystem(svc)
 	if err != nil {
-		log.Fatalf("Cannot construct Gdfs: %v\n", err)
+		log.Fatalf("Cannot construct Drive file system: %v\n", err)
 	}
 
-	nfs := pathfs.NewPathNodeFs(gdfs, nil)
-	server, _, err := nodefs.MountRoot(flag.Arg(0), nfs.Root(), nil)
+	c, err := fuse.Mount(mountpoint)
 	if err != nil {
-		log.Fatalf("Mount fail: %v\n", err)
+		log.Fatal(err)
 	}
-	server.Serve()
+	defer c.Close()
+
+	err = fusefs.Serve(c, gdfs)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	<-c.Ready
+	if err := c.MountError; err != nil {
+		log.Fatal(err)
+	}
 }

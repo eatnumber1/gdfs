@@ -9,9 +9,13 @@ import (
 	"github.com/eatnumber1/gdfs/util"
 
 	gdrive "code.google.com/p/google-api-go-client/drive/v2"
-
-	"github.com/hanwen/go-fuse/fuse"
 )
+
+var _ = log.Printf
+var _ = strings.Split
+var _ = sort.Sort
+var _ = fmt.Sprintf
+var _ = util.WithHere
 
 type Drive struct {
 	*gdrive.Service
@@ -30,6 +34,11 @@ func NewDrive(svc *gdrive.Service) (*Drive, error) {
 	}, nil
 }
 
+func (this *Drive) Root() (*File, error) {
+	return NewFileFromId(this, "root")
+}
+
+/*
 func (this *Drive) FilePathToId(path string) (string, error) {
 	util.WithHere(func(fun string, file string, line int) {
 		log.Printf("%s:%d %s(path=\"%v\")", file, line, fun, path)
@@ -125,3 +134,4 @@ func MimeToType(mime string) (mode uint32, err error) {
 	}
 	return
 }
+*/

@@ -4,15 +4,20 @@ import (
 	"log"
 	"time"
 	"fmt"
-
-	"github.com/hanwen/go-fuse/fuse"
-	"github.com/hanwen/go-fuse/fuse/nodefs"
-	"github.com/hanwen/go-fuse/fuse/pathfs"
+	"os"
 
 	"github.com/eatnumber1/gdfs/drive"
 	"github.com/eatnumber1/gdfs/util"
 	gdrive "code.google.com/p/google-api-go-client/drive/v2"
+
+	fuse "bazil.org/fuse"
+	fusefs "bazil.org/fuse/fs"
 )
+
+var _ = log.Printf
+var _ = time.Unix
+var _ = fmt.Sprintf
+var _ = util.WithHere
 
 const (
 	// TODO: Get rid of this
@@ -25,22 +30,197 @@ const (
 	X_OK = 1
 )
 
-type Gdfs struct {
-	pathfs.FileSystem
+type DriveFileSystem struct {
 	drive *drive.Drive
 }
 
-func NewGdfs(fs pathfs.FileSystem, svc *gdrive.Service) (*Gdfs, error) {
+func NewDriveFileSystem(svc *gdrive.Service) (*DriveFileSystem, error) {
 	drive, err := drive.NewDrive(svc)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Gdfs{
-		FileSystem: fs,
+	return &DriveFileSystem{
 		drive: drive,
 	}, nil
 }
+
+func (this *DriveFileSystem) Root() (node fusefs.Node, err fuse.Error) {
+	rootFile, err := this.drive.Root()
+	if err != nil {
+		return
+	}
+
+	node, err = NewNode(rootFile)
+	return
+}
+
+func (this *DriveFileSystem) Statfs(req *fuse.StatfsRequest, resp *fuse.StatfsResponse, intr fusefs.Intr) fuse.Error {
+	if req.Node != 1 {
+		panic("Unknown node for statfs")
+	}
+
+	// TODO: Get a more reasonable implementation
+	resp.Blocks = ^uint64(0)
+	resp.Bfree = ^uint64(0)
+	resp.Bavail = ^uint64(0)
+	resp.Files = uint64(0)
+	resp.Ffree = ^uint64(0)
+	resp.Bsize = ^uint32(0)
+	resp.Namelen = ^uint32(0)
+	/*resp.Frsize: ?*/
+
+	return nil
+}
+
+func (this *DriveFileSystem) GenerateInode(parentInode uint64, name string) uint64 {
+	// TODO: Implement an inode cache
+	if parentInode == 1 && name == "" {
+		node, err := this.Root()
+		if err != nil {
+			util.WithHere(func(fun string, file string, line int) {
+				log.Printf("%s:%d %s: %v", file, line, fun, err)
+			})
+			return ^uint64(0)
+		}
+		return node.(*Node).file.Inode()
+	}
+	panic(fmt.Sprintf("GenerateInode(%v, %v)", parentInode, name))
+}
+
+type Node struct {
+	fusefs.Node
+	file *drive.File
+	attr fuse.Attr
+}
+
+func NewNode(file *drive.File) (node *Node, err error) {
+	atime, err := file.Atime()
+	if err != nil {
+		return
+	}
+
+	mtime, err := file.Mtime()
+	if err != nil {
+		return
+	}
+
+	ctime, err := file.Ctime()
+	if err != nil {
+		return
+	}
+
+	crtime, err := file.Crtime()
+	if err != nil {
+		return
+	}
+
+	mode, err := file.Mode()
+	if err != nil {
+		return
+	}
+
+	isDir, err := file.IsDirectory()
+	if err != nil {
+		return
+	}
+
+	var nlink uint32 = 1
+	if isDir {
+		nlink++
+	}
+
+	size, err := file.Size()
+	if err != nil {
+		return
+	}
+
+	node = &Node{
+		file: file,
+		attr: fuse.Attr{
+			Inode: file.Inode(),
+			Size: size,
+			Blocks: 1, // TODO
+			Atime: atime,
+			Mtime: mtime,
+			Ctime: ctime,
+			Crtime: crtime,
+			Mode: mode,
+			Nlink: 2,
+			Uid: OWNER,
+			Gid: 0,
+			Rdev: 0, // TODO
+			Flags: 0,
+		},
+	}
+	return
+}
+
+func (this *Node) Attr() fuse.Attr {
+	return this.attr
+}
+
+func (this *Node) ReadDir(intr fusefs.Intr) ([]fuse.Dirent, fuse.Error) {
+	// TODO: Do something with intr
+
+	children, err := this.file.Children()
+	if err != nil {
+		return nil, err
+	}
+
+	dirents := make([]fuse.Dirent, len(children))
+	var validDirents int = 0
+	for idx := range children {
+		child := children[idx]
+
+		mode, err := child.Mode()
+		if err != nil {
+			switch e := err.(type) {
+			case drive.DriveError:
+				if e.Code() == drive.BANNED_MIME {
+					log.Println(err)
+					continue
+				}
+				return nil, err
+			default:
+				return nil, err
+			}
+		}
+
+		var direntType fuse.DirentType
+		if mode & os.ModeDir == 0 {
+			direntType = fuse.DT_Dir
+		} else {
+			direntType = fuse.DT_File
+		}
+
+		name, err := child.Name()
+		if err != nil {
+			return nil, err
+		}
+
+		dirents[validDirents] = fuse.Dirent{
+			Inode: child.Inode(),
+			Type: direntType,
+			Name: name,
+		}
+		validDirents++
+	}
+	dirents = dirents[:validDirents - 1]
+
+	return dirents, nil
+}
+
+func (this *Node) Lookup(name string, intr fusefs.Intr) (fusefs.Node, fuse.Error) {
+	file, err := this.file.ChildByName(name)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewNode(file)
+}
+
+/*
 
 // Deprecated
 func (this *Gdfs) getAccessBits(name string, uid uint32) (allowedMode uint32, err error) {
@@ -103,49 +283,12 @@ func drivePermToFsPerm(perm *gdrive.Permission) (mode uint32) {
 	return
 }
 
-func (this *Gdfs) OnMount(nodeFs *pathfs.PathNodeFs) {
-	log.Println("OnMount")
-}
-
 func (Gdfs) OnUnmount() {
 	log.Println("OnUnmount")
 }
 
 func (this *Gdfs) OpenDir(name string, context *fuse.Context) (c []fuse.DirEntry, code fuse.Status) {
 	log.Printf("OpenDir(name=\"%s\")\n", name)
-
-	/*
-	if name == "" {
-		name = "root"
-	}
-	children, err := this.drive.AllChildren(name)
-	*/
-
-	/*
-	dir, err := this.findDir(this.getMediaServer().GetRootDirectory(), name)
-	if err != nil {
-		// TODO: better errors
-		log.Fatalf("OpenDir fail: %v\n", err)
-		return nil, fuse.EIO
-	}
-	if dir == nil {
-		return nil, fuse.ENOENT
-	}
-	contents, err := dir.GetContents()
-	if err != nil {
-		// TODO: better errors
-		log.Fatalf("OpenDir fail: %v\n", err)
-		return nil, fuse.EIO
-	}
-	dirs := make([]fuse.DirEntry, len(contents))
-	for i, content := range contents {
-		dirs[i] = fuse.DirEntry{
-			Name: content.GetTitle(),
-			Mode: fuse.S_IFDIR,
-		}
-	}
-	*/
-
 	//return make([]fuse.DirEntry, 0), fuse.OK
 
 	folderId, err := this.drive.FileNameToId(name)
@@ -186,25 +329,6 @@ func (this *Gdfs) OpenDir(name string, context *fuse.Context) (c []fuse.DirEntry
 
 func (this *Gdfs) GetAttr(name string, context *fuse.Context) (a *fuse.Attr, code fuse.Status) {
 	log.Printf("GetAttr(name=\"%s\")\n", name)
-	/*
-	if name == "" {
-		return &fuse.Attr{
-			Mode: fuse.S_IFDIR | 0555,
-		}, fuse.OK
-	} else {
-		dir, err := this.findDir(this.getMediaServer().GetRootDirectory(), name)
-		if err != nil {
-			log.Fatalf("OpenDir fail: %v\n", err)
-			return nil, fuse.EIO
-		}
-		if dir == nil {
-			return nil, fuse.ENOENT
-		}
-		return &fuse.Attr{
-			Mode: fuse.S_IFDIR | 0555,
-		}, fuse.OK
-	}
-	*/
 
 	file, err := this.drive.FileFromPath(name)
 	if err != nil {
@@ -269,7 +393,7 @@ func (this *Gdfs) GetAttr(name string, context *fuse.Context) (a *fuse.Attr, cod
 		Nlink: 1,
 		Owner: fuse.Owner{
 			Uid: OWNER,
-			/*Gid:,*/
+			//Gid:,
 		},
 	}
 
@@ -386,3 +510,4 @@ func (Gdfs) StatFs(name string) *fuse.StatfsOut {
 		NameLen: ^uint32(0),
 	}
 }
+*/

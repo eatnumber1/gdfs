@@ -2,6 +2,11 @@ package drive
 
 type DriveErrorCode int
 
+type DriveError interface {
+	error
+	Code() DriveErrorCode
+}
+
 type driveError struct {
 	msg string
 	code DriveErrorCode
@@ -9,10 +14,10 @@ type driveError struct {
 
 const (
 	NOT_FOUND DriveErrorCode = iota
-	UNKNOWN_MIME DriveErrorCode = iota
+	BANNED_MIME DriveErrorCode = iota
 )
 
-func NewDriveError(msg string, code DriveErrorCode) error {
+func NewDriveError(msg string, code DriveErrorCode) DriveError {
 	return &driveError{
 		msg: msg,
 		code: code,
@@ -21,4 +26,8 @@ func NewDriveError(msg string, code DriveErrorCode) error {
 
 func (this *driveError) Error() string {
 	return this.msg
+}
+
+func (this *driveError) Code() DriveErrorCode {
+	return this.code
 }
