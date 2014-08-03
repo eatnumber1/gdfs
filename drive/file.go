@@ -27,7 +27,7 @@ const (
 // TODO: Support partial requests and responses
 
 type File struct {
-	file *gdrive.File
+	*gdrive.File
 	drive *Drive
 }
 
@@ -67,6 +67,10 @@ func (this *File) Inode() uint64 {
 	return inode
 }
 
+func (this *File) Id() string {
+	return this.file.Id
+}
+
 func drivePermToFsPerm(perm *gdrive.Permission) (mode os.FileMode) {
 	mode = 0
 	switch perm.Role {
@@ -98,7 +102,7 @@ func drivePermToFsPerm(perm *gdrive.Permission) (mode os.FileMode) {
 	return
 }
 
-func mimeToType(mime string) (mode os.FileMode, err error) {
+func mimeToMode(mime string) (mode os.FileMode, err error) {
 	switch mime {
 	case "application/vnd.google-apps.folder":
 		mode = os.ModeDir
@@ -127,7 +131,7 @@ func mimeToType(mime string) (mode os.FileMode, err error) {
 
 func (this *File) Mode() (mode os.FileMode, err error) {
 	// TODO: Map the file owner to a uid/gid
-	mode, err = mimeToType(this.file.MimeType)
+	mode, err = mimeToMode(this.file.MimeType)
 	if err != nil {
 		return 0, err
 	}
@@ -173,9 +177,11 @@ func (this *File) Mtime() (modified time.Time, err error) {
 	return time.Parse(time.RFC3339, this.file.ModifiedDate)
 }
 
+/*
 func (this *File) Ctime() (created time.Time, err error) {
 	return this.Mtime()
 }
+*/
 
 func (this *File) Crtime() (created time.Time, err error) {
 	if this.file.CreatedDate == "" {
@@ -250,9 +256,61 @@ func (this *File) Name() (string, error) {
 	return this.file.Title, nil
 }
 
-type OpenFile io.ReadCloser
+func (this *File) Delete() error {
+	return this.drive.Files.Delete(this.file.Id).Do()
+}
 
-func (this *File) Open() (OpenFile, error) {
+func (this *File) insert(name string, mimeType string, reader io.Reader) (file *File, err error) {
+	gdfile := &gdrive.File{
+		Parents:  []*gdrive.ParentReference{
+			&gdrive.ParentReference{
+				Id: this.file.Id,
+				Kind: "drive#parentReference",
+			},
+		},
+		Title: name,
+	}
+	if mimeType != "" {
+		gdfile.MimeType = mimeType
+	}
+
+	insertCall := this.drive.Files.Insert(gdfile)
+	if reader != nil {
+		insertCall.Media(reader)
+	}
+	gdfile, err = insertCall.Do()
+	if err != nil {
+		return
+	}
+
+	file = NewFile(this.drive, gdfile)
+	return
+}
+
+func (this *File) InsertFile(name string, reader io.Reader) (*File, error) {
+	return this.insert(name, "", reader)
+}
+
+func (this *File) InsertDirectory(name string) (*File, error) {
+	return this.insert(name, "application/vnd.google-apps.folder", nil)
+}
+
+func (this *File) Update(reader io.Reader) (err error) {
+	// TODO: Check that the mtime, atime, ctime, crtime is updated.
+	updateCall := this.drive.Files.Update(this.file.Id, nil)
+	updateCall.Media(reader)
+	file, err := updateCall.Do()
+	if err != nil {
+		return
+	}
+	this.file = file
+	return
+}
+
+// TODO: Drive could support hardlinks of the same name.
+
+// The file you open must exist.
+func (this *File) Read() (io.ReadCloser, error) {
 	log.Printf("Fetching url %s\n", this.file.DownloadUrl)
 	resp, err := this.drive.client.Get(this.file.DownloadUrl)
 	if err != nil {

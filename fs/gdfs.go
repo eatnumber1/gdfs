@@ -1,23 +1,15 @@
 package gdfs
 
 import (
-	"log"
 	"fmt"
-	"os"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/eatnumber1/gdfs/drive"
-	"github.com/eatnumber1/gdfs/util"
+	"github.com/eatnumber1/gdfs/cache"
 	gdrive "code.google.com/p/google-api-go-client/drive/v2"
 
 	fuse "bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
-)
-
-const (
-	// TODO: Get rid of these
-	OWNER uint32 = 168633
 )
 
 const (
@@ -28,17 +20,24 @@ const (
 
 type DriveFileSystem struct {
 	drive *drive.Drive
+	cache *cache.Cache
 }
 
-func NewDriveFileSystem(svc *gdrive.Service, client *http.Client) (*DriveFileSystem, error) {
+func NewDriveFileSystem(svc *gdrive.Service, client *http.Client) (fs *DriveFileSystem, err error) {
 	drive, err := drive.NewDrive(svc, client)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	return &DriveFileSystem{
+	cache, err := cache.NewCache()
+	if err != nil {
+		return
+	}
+
+	fs = &DriveFileSystem{
 		drive: drive,
-	}, nil
+		cache: cache,
+	}
 }
 
 func (this *DriveFileSystem) Root() (node fusefs.Node, err fuse.Error) {
@@ -47,26 +46,35 @@ func (this *DriveFileSystem) Root() (node fusefs.Node, err fuse.Error) {
 		return
 	}
 
-	node, err = NewNode(rootFile)
+	cacheFile, err := this.cache.File(rootFile)
+	if err != nil {
+		return
+	}
+
+	node, err = NewNode(rootFile, cacheFile)
 	return
 }
 
-func (this *DriveFileSystem) Statfs(req *fuse.StatfsRequest, resp *fuse.StatfsResponse, intr fusefs.Intr) fuse.Error {
+func (this *DriveFileSystem) Statfs(req *fuse.StatfsRequest, resp *fuse.StatfsResponse, intr fusefs.Intr) (err fuse.Error) {
 	if req.Node != 1 {
 		panic("Unknown node for statfs")
+	}
+
+	statfs, err := this.cache.Statfs()
+	if err != nil {
+		return
 	}
 
 	// TODO: Get a more reasonable implementation
 	resp.Blocks = ^uint64(0)
 	resp.Bfree = ^uint64(0)
 	resp.Bavail = ^uint64(0)
-	resp.Files = uint64(0)
+	resp.Files = uint64(0) // TODO
 	resp.Ffree = ^uint64(0)
-	resp.Bsize = ^uint32(0)
-	resp.Namelen = ^uint32(0)
-	/*resp.Frsize: ?*/
-
-	return nil
+	resp.Bsize = statfs.Bsize
+	resp.Namelen = statfs.Namelen // TODO: Does drive have a namelen?
+	resp.Frsize = statfs.Frsize
+	return
 }
 
 func (this *DriveFileSystem) GenerateInode(parentInode uint64, name string) uint64 {
@@ -74,167 +82,11 @@ func (this *DriveFileSystem) GenerateInode(parentInode uint64, name string) uint
 	if parentInode == 1 && name == "" {
 		node, err := this.Root()
 		if err != nil {
-			util.WithHere(func(fun string, file string, line int) {
-				log.Printf("%s:%d %s: %v", file, line, fun, err)
-			})
 			return ^uint64(0)
 		}
 		return node.(*Node).file.Inode()
 	}
 	panic(fmt.Sprintf("GenerateInode(%v, %v)", parentInode, name))
-}
-
-type Node struct {
-	fusefs.Node
-	file *drive.File
-	attr fuse.Attr
-}
-
-func NewNode(file *drive.File) (node *Node, err error) {
-	atime, err := file.Atime()
-	if err != nil {
-		return
-	}
-
-	mtime, err := file.Mtime()
-	if err != nil {
-		return
-	}
-
-	ctime, err := file.Ctime()
-	if err != nil {
-		return
-	}
-
-	crtime, err := file.Crtime()
-	if err != nil {
-		return
-	}
-
-	mode, err := file.Mode()
-	if err != nil {
-		return
-	}
-
-	isDir, err := file.IsDirectory()
-	if err != nil {
-		return
-	}
-
-	var nlink uint32 = 1
-	if isDir {
-		nlink++
-	}
-
-	size, err := file.Size()
-	if err != nil {
-		return
-	}
-
-	node = &Node{
-		file: file,
-		attr: fuse.Attr{
-			Inode: file.Inode(),
-			Size: size,
-			Blocks: 1, // TODO
-			Atime: atime,
-			Mtime: mtime,
-			Ctime: ctime,
-			Crtime: crtime,
-			Mode: mode,
-			Nlink: 2,
-			Uid: OWNER,
-			Gid: 0,
-			Rdev: 0, // TODO
-			Flags: 0,
-		},
-	}
-	return
-}
-
-func (this *Node) Attr() fuse.Attr {
-	return this.attr
-}
-
-func (this *Node) ReadDir(intr fusefs.Intr) ([]fuse.Dirent, fuse.Error) {
-	// TODO: Do something with intr
-
-	children, err := this.file.Children()
-	if err != nil {
-		return nil, err
-	}
-
-	dirents := make([]fuse.Dirent, len(children))
-	var validDirents int = 0
-	for idx := range children {
-		child := children[idx]
-
-		mode, err := child.Mode()
-		if err != nil {
-			switch e := err.(type) {
-			case drive.DriveError:
-				if e.Code() == drive.BANNED_MIME {
-					log.Println(err)
-					continue
-				}
-				return nil, err
-			default:
-				return nil, err
-			}
-		}
-
-		var direntType fuse.DirentType
-		if mode & os.ModeDir == 0 {
-			direntType = fuse.DT_Dir
-		} else {
-			direntType = fuse.DT_File
-		}
-
-		name, err := child.Name()
-		if err != nil {
-			return nil, err
-		}
-
-		dirents[validDirents] = fuse.Dirent{
-			Inode: child.Inode(),
-			Type: direntType,
-			Name: name,
-		}
-		validDirents++
-	}
-	dirents = dirents[:validDirents - 1]
-
-	return dirents, nil
-}
-
-func (this *Node) Lookup(name string, intr fusefs.Intr) (fusefs.Node, fuse.Error) {
-	file, err := this.file.ChildByName(name)
-	if err != nil {
-		return nil, err
-	}
-
-	return NewNode(file)
-}
-
-// TODO: Support partial reads
-func (this *Node) ReadAll(intr fusefs.Intr) (body []byte, err fuse.Error) {
-	fd, err := this.file.Open()
-	if err != nil {
-		return
-	}
-	defer func() {
-		e := fd.Close()
-		if err != nil {
-			err = e
-		}
-	}()
-
-	body, err = ioutil.ReadAll(fd)
-	if err != nil {
-		body = nil
-		return
-	}
-	return
 }
 
 /*
