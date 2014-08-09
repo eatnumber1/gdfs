@@ -25,7 +25,7 @@ var (
 // Settings for authorization.
 var config = &oauth.Config{
 	ClientId: "12763834838-cbckm8j2p4gesmdrok8censnqn0mahcu.apps.googleusercontent.com",
-	ClientSecret: "BNnTKWcgj9FyANzbuRrjcolT",
+	ClientSecret: "hawoops",
 	Scope: "https://www.googleapis.com/auth/drive",
 	RedirectURL: "urn:ietf:wg:oauth:2.0:oob",
 	AuthURL: "https://accounts.google.com/o/oauth2/auth",
