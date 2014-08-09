@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"encoding/json"
+	"io/ioutil"
 
 	//"github.com/eatnumber1/gdfs/fs"
 	"github.com/eatnumber1/gdfs/drive"
@@ -24,13 +26,18 @@ var (
 
 // Settings for authorization.
 var config = &oauth.Config{
-	ClientId: "12763834838-cbckm8j2p4gesmdrok8censnqn0mahcu.apps.googleusercontent.com",
-	ClientSecret: "hawoops",
+	ClientId: "",
+	ClientSecret: "",
 	Scope: "https://www.googleapis.com/auth/drive",
 	RedirectURL: "urn:ietf:wg:oauth:2.0:oob",
 	AuthURL: "https://accounts.google.com/o/oauth2/auth",
 	TokenURL: "https://accounts.google.com/o/oauth2/token",
 	TokenCache: oauth.CacheFile(*cachefile),
+}
+
+type Credentials struct {
+	Id string
+	Secret string
 }
 
 func main() {
@@ -45,6 +52,20 @@ func main() {
 		os.Exit(2)
 	}
 	mountpoint := flag.Arg(0)
+
+	credsBytes, err := ioutil.ReadFile("creds.json")
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	var creds Credentials
+	err = json.Unmarshal(credsBytes, &creds)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	config.ClientSecret = creds.Secret
+	config.ClientId = creds.Id
 
 	transport := &oauth.Transport{
 		Config: config,
