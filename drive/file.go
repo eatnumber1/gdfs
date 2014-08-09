@@ -1,5 +1,6 @@
 package drive
 
+/*
 import (
 	"time"
 	"fmt"
@@ -13,17 +14,6 @@ import (
 	fuse "bazil.org/fuse"
 )
 
-const (
-	// TODO: Get rid of this
-	OWNER uint32 = 168633
-)
-
-const (
-	R_OK os.FileMode = 4
-	W_OK os.FileMode = 2
-	X_OK os.FileMode = 1
-)
-
 // TODO: Support partial requests and responses
 
 type File struct {
@@ -32,12 +22,6 @@ type File struct {
 }
 
 func NewFileFromId(drive *Drive, id string) (*File, error) {
-	/*
-	fileId, err := drive.FilePathToId(path)
-	if err != nil {
-		return nil, err
-	}
-	*/
 
 	file, err := drive.Files.Get(id).Do()
 	if err != nil {
@@ -65,64 +49,6 @@ func (this *File) Inode() uint64 {
 		inode += uint64(bytes[idx])
 	}
 	return inode
-}
-
-func drivePermToFsPerm(perm *gdrive.Permission) (mode os.FileMode) {
-	mode = 0
-	switch perm.Role {
-	case "owner":
-		fallthrough
-	case "writer":
-		mode |= W_OK
-		fallthrough
-	case "reader":
-		mode |= R_OK | X_OK
-	default:
-		panic(fmt.Sprintf("Unknown role \"%v\"", perm.Role))
-	}
-
-	switch perm.Type {
-	case "user":
-		// offset is zero, so do nothing
-	case "anyone":
-		mode = (mode << 3) | (mode << 6)
-	case "domain":
-		fallthrough
-	case "group":
-		// TODO: Map domain and group to ACLs
-	default:
-		panic(fmt.Sprintf("Unknown permission type \"%v\"", perm.Type))
-	}
-
-	log.Printf("mode = %b\n", mode)
-	return
-}
-
-func mimeToType(mime string) (mode os.FileMode, err error) {
-	switch mime {
-	case "application/vnd.google-apps.folder":
-		mode = os.ModeDir
-	case "application/vnd.google-apps.document":
-		fallthrough
-	case "application/vnd.google-apps.drawing":
-		fallthrough
-	case "application/vnd.google-apps.form":
-		fallthrough
-	case "application/vnd.google-apps.fusiontable":
-		fallthrough
-	case "application/vnd.google-apps.presentation":
-		fallthrough
-	case "application/vnd.google-apps.sites":
-		fallthrough
-	case "application/vnd.google-apps.script":
-		fallthrough
-	case "application/vnd.google-apps.spreadsheet":
-		err = NewDriveError(fmt.Sprintf("Banned mime type \"%s\"", mime), BANNED_MIME)
-		return
-	default:
-		// Empty
-	}
-	return
 }
 
 func (this *File) Mode() (mode os.FileMode, err error) {
@@ -270,3 +196,4 @@ func (this *File) Open() (OpenFile, error) {
 
 	return resp.Body, nil
 }
+*/

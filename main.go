@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/eatnumber1/gdfs/fs"
+	//"github.com/eatnumber1/gdfs/fs"
+	"github.com/eatnumber1/gdfs/drive"
 
 	"bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
 	_ "bazil.org/fuse/fs/fstestutil"
 
-	"code.google.com/p/google-api-go-client/drive/v2"
+	gdrive "code.google.com/p/google-api-go-client/drive/v2"
 	"code.google.com/p/goauth2/oauth"
 )
 
@@ -76,12 +77,13 @@ func main() {
 	transport.Token = token
 
 	// Create a new authorized Drive client.
-	svc, err := drive.New(transport.Client())
+	svc, err := gdrive.New(transport.Client())
 	if err != nil {
 		log.Fatalf("An error occurred creating Drive client: %v\n", err)
 	}
 
-	gdfs, err := gdfs.NewDriveFileSystem(svc, transport.Client())
+	//gdfs, err := gdfs.NewDriveFileSystem(svc, transport.Client())
+	gdfs, err := drive.NewDrive(svc, transport.Client())
 	if err != nil {
 		log.Fatalf("Cannot construct Drive file system: %v\n", err)
 	}

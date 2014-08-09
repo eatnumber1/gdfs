@@ -1,5 +1,7 @@
 package drive
 
+// TODO: Support interrupting requests
+
 import (
 	"fmt"
 	"strings"
@@ -8,8 +10,12 @@ import (
 	"net/http"
 
 	"github.com/eatnumber1/gdfs/util"
+	"github.com/eatnumber1/gdfs/drive/fetched"
 
 	gdrive "code.google.com/p/google-api-go-client/drive/v2"
+
+	fuse "bazil.org/fuse"
+	fusefs "bazil.org/fuse/fs"
 )
 
 var _ = log.Printf
@@ -19,26 +25,67 @@ var _ = fmt.Sprintf
 var _ = util.WithHere
 
 type Drive struct {
-	*gdrive.Service
-	About *gdrive.About
+	service *gdrive.Service
 	client *http.Client
+	aboutFetcher *fetched.AboutValue
 }
 
-func NewDrive(svc *gdrive.Service, client *http.Client) (*Drive, error) {
-	about, err := svc.About.Get().Do()
+// TODO: Construct the service ourselves.
+func NewDrive(svc *gdrive.Service, client *http.Client) (drive *Drive, err error) {
+	drive = &Drive{
+		service: svc,
+		client: client,
+		aboutFetcher: fetched.NewAboutValue(svc),
+	}
+	return
+}
+
+func (this *Drive) Root() (node fusefs.Node, err fuse.Error) {
+	about, err := this.aboutFetcher.About(nil)
 	if err != nil {
-		return nil, err
+		return
+	}
+	node = NewNode(this, about.RootFolderId)
+	return
+}
+
+func (this Drive) Statfs(req *fuse.StatfsRequest, resp *fuse.StatfsResponse, intr fusefs.Intr) (err fuse.Error) {
+	if req.Node != 1 {
+		panic("Unknown node for statfs")
 	}
 
-	return &Drive{
-		Service: svc,
-		About: about,
-		client: client,
-	}, nil
+	// TODO: Get a more reasonable implementation
+	resp.Blocks = ^uint64(0)
+	resp.Bfree = ^uint64(0)
+	resp.Bavail = ^uint64(0)
+	resp.Files = uint64(0)
+	resp.Ffree = ^uint64(0)
+
+	// TODO: What's a reasonable value here?
+	resp.Namelen = ^uint32(0)
+
+	// TODO: What's a reasonable value here?
+	resp.Bsize = ^uint32(0) // preferred block size
+	resp.Frsize = ^uint32(0) // fundamental block size
+
+	return
 }
 
-func (this *Drive) Root() (*File, error) {
-	return NewFileFromId(this, this.About.RootFolderId)
+func (this *Drive) GenerateInode(parentInode uint64, name string) uint64 {
+	if parentInode == 1 && name == "" {
+		node, err := this.Root()
+		if err != nil {
+			log.Fatalf("GenerateInode(): error fetching root: %v", err)
+			return ^uint64(0)
+		}
+		inode, err := node.(*Node).Inode()
+		if err != nil {
+			log.Fatalf("GenerateInode(): error fetching inode: %v", err)
+			return ^uint64(0)
+		}
+		return inode
+	}
+	panic(fmt.Sprintf("GenerateInode(%v, %v)", parentInode, name))
 }
 
 /*
