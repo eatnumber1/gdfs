@@ -71,11 +71,6 @@ func (this *DirValueImpl) Get(intr fusefs.Intr) (interface{}, error) {
 	return this.file.Get(intr)
 }
 
-func (this *DirValueImpl) Done() {
-	this.file.Done()
-	this.contents.Done()
-}
-
 func (this *DirValueImpl) Forget() {
 	this.file.Forget()
 	this.contents.Forget()

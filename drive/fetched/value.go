@@ -13,7 +13,6 @@ type FetchFunc func(fusefs.Intr) (interface{}, error)
 
 type Value interface {
 	Get(fusefs.Intr) (interface{}, error)
-	Done()
 	Forget()
 }
 
@@ -57,15 +56,12 @@ func (this *valueImpl) Get(intr fusefs.Intr) (interface{}, error) {
 	}
 }
 
-func (this *valueImpl) Done() {
-	v := atomic.SwapInt32(&this.isShutdown, 1)
-	if v == 0 {
-		close(this.shutdown)
-	}
+func (this *valueImpl) done() {
+	close(this.shutdown)
 }
 
 func finalizeRef(ref *valueRef) {
-	ref.Done()
+	ref.done()
 }
 
 func NewValue(fetchFunc FetchFunc) Value {
