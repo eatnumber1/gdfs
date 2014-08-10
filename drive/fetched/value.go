@@ -4,7 +4,6 @@ import (
 	"sync/atomic"
 	"sync"
 	"runtime"
-	"log"
 
 	fuse "bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
@@ -61,13 +60,8 @@ func (this *ValueImpl) Done() {
 	}
 }
 
-func finalizeImpl(impl *ValueImpl) {
-	log.Printf("finalizeImpl: %p", impl)
-}
-
 func finalizeRef(ref *ValueRef) {
 	ref.Done()
-	log.Printf("finalizeRef: %p", ref)
 }
 
 func NewValue(fetchFunc FetchFunc) Value {
@@ -83,7 +77,6 @@ func NewValue(fetchFunc FetchFunc) Value {
 	}
 	ref := &ValueRef{ impl }
 	runtime.SetFinalizer(ref, finalizeRef)
-	runtime.SetFinalizer(impl, finalizeImpl)
 	return ref
 }
 
