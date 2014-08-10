@@ -3,7 +3,6 @@ package drive
 import (
 	"unsafe"
 	"sync/atomic"
-	"log"
 
 	"github.com/eatnumber1/gdfs/drive/fetched"
 	"github.com/eatnumber1/gdfs/util"
@@ -29,7 +28,6 @@ func (this *DirHandleCache) Ref() {
 
 func (this *DirHandleCache) Unref() {
 	if this.refcnt.Unref() {
-		log.Printf("clearing")
 		atomic.StorePointer(&this.dirents, unsafe.Pointer(nil))
 		this.fetcher.Forget()
 	}
