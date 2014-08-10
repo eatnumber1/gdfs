@@ -129,6 +129,7 @@ func (this *valueImpl) unref() {
 	refcnt := atomic.AddInt64(&this.waiters, int64(-1))
 	if refcnt == -1 {
 		panic("unref() called on value with zero waiters")
+	// TODO: Accesses to this.intr here is racy
 	} else if refcnt == 0 && this.intr != nil {
 		close(this.intr)
 		this.intr = nil
