@@ -17,7 +17,7 @@ type Value interface {
 	Forget()
 }
 
-type ValueImpl struct {
+type valueImpl struct {
 	waiters int64
 	intr fusefs.Intr
 	shutdown chan struct{}
@@ -32,8 +32,12 @@ type ValueImpl struct {
 	fetchFunc FetchFunc
 }
 
-type ValueRef struct {
-	*ValueImpl
+// This is a container type upon which we place a finalizer. This is because we
+// start goroutines which hold pointers to valueImpl which prevents garbage
+// collection. Using valueRef's finalizer, we can know to shutdown valueImpl's
+// goroutines when valueRef is finalized.
+type valueRef struct {
+	*valueImpl
 }
 
 type fetcherResult struct {
@@ -41,7 +45,7 @@ type fetcherResult struct {
 	err error
 }
 
-func (this *ValueImpl) Get(intr fusefs.Intr) (interface{}, error) {
+func (this *valueImpl) Get(intr fusefs.Intr) (interface{}, error) {
 	this.beginFetch()
 	this.ref()
 	defer this.unref()
@@ -53,19 +57,19 @@ func (this *ValueImpl) Get(intr fusefs.Intr) (interface{}, error) {
 	}
 }
 
-func (this *ValueImpl) Done() {
+func (this *valueImpl) Done() {
 	v := atomic.SwapInt32(&this.isShutdown, 1)
 	if v == 0 {
 		close(this.shutdown)
 	}
 }
 
-func finalizeRef(ref *ValueRef) {
+func finalizeRef(ref *valueRef) {
 	ref.Done()
 }
 
 func NewValue(fetchFunc FetchFunc) Value {
-	impl := &ValueImpl{
+	impl := &valueImpl{
 		waiters: 0,
 		intr: make(fusefs.Intr),
 		shutdown: make(chan struct{}),
@@ -75,16 +79,16 @@ func NewValue(fetchFunc FetchFunc) Value {
 		fetchOnce: &sync.Once{},
 		isShutdown: 0,
 	}
-	ref := &ValueRef{ impl }
+	ref := &valueRef{ impl }
 	runtime.SetFinalizer(ref, finalizeRef)
 	return ref
 }
 
-func (this *ValueImpl) Forget() {
+func (this *valueImpl) Forget() {
 	this.forget <- struct{}{}
 }
 
-func (this *ValueImpl) fetch() {
+func (this *valueImpl) fetch() {
 	intrc := make(fusefs.Intr)
 	resc := make(chan fetcherResult, 1)
 	go func() {
@@ -121,11 +125,11 @@ func (this *ValueImpl) fetch() {
 	}
 }
 
-func (this *ValueImpl) ref() {
+func (this *valueImpl) ref() {
 	atomic.AddInt64(&this.waiters, int64(1))
 }
 
-func (this *ValueImpl) unref() {
+func (this *valueImpl) unref() {
 	refcnt := atomic.AddInt64(&this.waiters, int64(-1))
 	if refcnt == -1 {
 		panic("unref() called on value with zero waiters")
@@ -135,14 +139,14 @@ func (this *ValueImpl) unref() {
 	}
 }
 
-func (this *ValueImpl) resetFetchOnce() {
+func (this *valueImpl) resetFetchOnce() {
 	this.fetchOnceLock.Lock()
 	defer this.fetchOnceLock.Unlock()
 
 	this.fetchOnce = &sync.Once{}
 }
 
-func (this *ValueImpl) beginFetch() {
+func (this *valueImpl) beginFetch() {
 	this.fetchOnceLock.RLock()
 	defer this.fetchOnceLock.RUnlock()
 
