@@ -43,6 +43,7 @@ func NewDrive(svc *gdrive.Service, client *http.Client) (drive *Drive, err error
 func (this *Drive) Root() (node fusefs.Node, err fuse.Error) {
 	about, err := this.aboutFetcher.About(nil)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 	node = NewNode(this, about.RootFolderId)

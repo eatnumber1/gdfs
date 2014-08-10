@@ -5,7 +5,10 @@ import (
 	"log"
 	"fmt"
 	"syscall"
+	"sync/atomic"
+	"unsafe"
 
+	"github.com/eatnumber1/gdfs/util"
 	"github.com/eatnumber1/gdfs/drive/fetched"
 
 	//gdrive "code.google.com/p/google-api-go-client/drive/v2"
@@ -29,6 +32,7 @@ type Node struct {
 	fusefs.NodeRef
 	drive *Drive
 	fetcher fetched.FileValue
+	cache unsafe.Pointer // *HandleCache
 }
 
 func NewNode(drive *Drive, fileId string) *Node {
@@ -41,6 +45,7 @@ func NewNode(drive *Drive, fileId string) *Node {
 func (this *Node) Inode() (uint64, error) {
 	file, err := this.fetcher.File(nil)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return ^uint64(0), err
 	}
 
@@ -49,11 +54,16 @@ func (this *Node) Inode() (uint64, error) {
 
 func (this *Node) Forget() {
 	this.fetcher.Forget()
+	cache := (*HandleCache)(atomic.LoadPointer(&this.cache))
+	if cache != nil {
+		(*cache).Unref()
+	}
 }
 
 func (this *Node) Lookup(name string, intr fusefs.Intr) (node fusefs.Node, err fuse.Error) {
 	mode, err := this.mode(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
@@ -64,6 +74,7 @@ func (this *Node) Lookup(name string, intr fusefs.Intr) (node fusefs.Node, err f
 
 	file, err := this.fetcher.File(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
@@ -76,6 +87,7 @@ func (this *Node) Lookup(name string, intr fusefs.Intr) (node fusefs.Node, err f
 	call.Q(fmt.Sprintf("title = '%s'", name))
 	children, err := call.Do()
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return nil, err
 	}
 
@@ -92,6 +104,7 @@ func (this *Node) Lookup(name string, intr fusefs.Intr) (node fusefs.Node, err f
 func (this *Node) Getattr(req *fuse.GetattrRequest, resp *fuse.GetattrResponse, intr fusefs.Intr) (err fuse.Error) {
 	file, err := this.fetcher.File(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
@@ -102,31 +115,37 @@ func (this *Node) Getattr(req *fuse.GetattrRequest, resp *fuse.GetattrResponse, 
 
 	mtime, err := mtime(file)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
 	atime, err := atime(file)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
 	crtime, err := crtime(file)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
 	inode, err := this.Inode()
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
 	about, err := this.drive.aboutFetcher.About(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
 	mode, err := mode(file, about)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
@@ -169,6 +188,7 @@ func (this *Node) Attr() fuse.Attr {
 func (this *Node) Open(req *fuse.OpenRequest, resp *fuse.OpenResponse, intr fusefs.Intr) (handle fusefs.Handle, err fuse.Error) {
 	mode, err := this.mode(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
@@ -182,7 +202,7 @@ func (this *Node) Open(req *fuse.OpenRequest, resp *fuse.OpenResponse, intr fuse
 	}
 
 	if req.Dir {
-		handle = NewDirHandleFromFileValue(this.drive, this.fetcher)
+		handle = NewDirHandleFromFileValue(this.drive, this.fetcher, &this.cache)
 	} else {
 		err = fuse.EIO
 		return
@@ -193,11 +213,13 @@ func (this *Node) Open(req *fuse.OpenRequest, resp *fuse.OpenResponse, intr fuse
 func (this Node) mode(intr fusefs.Intr) (ret os.FileMode, err error) {
 	file, err := this.fetcher.File(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
 	about, err := this.drive.aboutFetcher.About(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 

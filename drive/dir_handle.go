@@ -6,6 +6,7 @@ import (
 	"unsafe"
 	"sync/atomic"
 
+	"github.com/eatnumber1/gdfs/util"
 	"github.com/eatnumber1/gdfs/drive/fetched"
 
 	gdrive "code.google.com/p/google-api-go-client/drive/v2"
@@ -14,34 +15,49 @@ import (
 	fusefs "bazil.org/fuse/fs"
 )
 
-// TODO: Cache the DirValue and dirents in the node.
-
 type DirHandle struct {
 	drive *Drive
-	fetcher fetched.DirValue
-	dirents unsafe.Pointer // *[]fuse.Dirent
+	cache *DirHandleCache
 }
 
-func NewDirHandleFromFileValue(drive *Drive, fetcher fetched.FileValue) *DirHandle {
-	return NewDirHandle(drive, fetched.NewDirValueFromFileValue(fetcher, drive.service))
+func NewDirHandleFromFileValue(drive *Drive, fetcher fetched.FileValue, cacheptrptr *unsafe.Pointer) *DirHandle {
+	return NewDirHandle(drive, fetched.NewDirValueFromFileValue(fetcher, drive.service), cacheptrptr)
 }
 
-func NewDirHandle(drive *Drive, fetcher fetched.DirValue) *DirHandle {
+func NewDirHandle(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe.Pointer) *DirHandle {
+	// This is slightly racy. Meh
+	cacheptr := atomic.LoadPointer(cacheptrptr)
+	var cache *DirHandleCache
+	if cacheptr != nil {
+		cache = (*(*HandleCache)(cacheptr)).(*DirHandleCache)
+		cache.Ref()
+	} else {
+		cache = NewDirHandleCache(fetcher)
+		var handleCache HandleCache = cache
+		old := atomic.SwapPointer(cacheptrptr, unsafe.Pointer(&handleCache))
+		if old != nil {
+			(*((*HandleCache)(old))).Unref()
+		}
+		// Ref() for the node
+		cache.Ref()
+	}
+
 	return &DirHandle{
 		drive: drive,
-		fetcher: fetcher,
+		cache: cache,
 	}
 }
 
 func (this *DirHandle) ReadDir(intr fusefs.Intr) (dirents []fuse.Dirent, err fuse.Error) {
-	dp := (*[]fuse.Dirent)(atomic.LoadPointer(&this.dirents))
+	dp := (*[]fuse.Dirent)(atomic.LoadPointer(&this.cache.dirents))
 	if dp != nil {
 		dirents = *dp
 		return
 	}
 
-	children, err := this.fetcher.List(intr)
+	children, err := this.cache.fetcher.List(intr)
 	if err != nil {
+		err = util.FuseErrorOrFatalf(err)
 		return
 	}
 
@@ -53,12 +69,14 @@ func (this *DirHandle) ReadDir(intr fusefs.Intr) (dirents []fuse.Dirent, err fus
 		var file *gdrive.File
 		file, err = child.File(intr)
 		if err != nil {
+			err = util.FuseErrorOrFatalf(err)
 			return
 		}
 
 		var about *gdrive.About
 		about, err = this.drive.aboutFetcher.About(intr)
 		if err != nil {
+			err = util.FuseErrorOrFatalf(err)
 			return
 		}
 
@@ -73,6 +91,7 @@ func (this *DirHandle) ReadDir(intr fusefs.Intr) (dirents []fuse.Dirent, err fus
 				}
 				return nil, e
 			default:
+				e = util.FuseErrorOrFatalf(e)
 				return nil, e
 			}
 		}
@@ -90,7 +109,7 @@ func (this *DirHandle) ReadDir(intr fusefs.Intr) (dirents []fuse.Dirent, err fus
 		dirents = ents[:validEnts - 1]
 	}
 
-	atomic.StorePointer(&this.dirents, unsafe.Pointer(&dirents))
+	atomic.StorePointer(&this.cache.dirents, unsafe.Pointer(&dirents))
 	return
 }
 
@@ -99,7 +118,6 @@ func (this *DirHandle) Flush(req *fuse.FlushRequest, intr fusefs.Intr) (err fuse
 }
 
 func (this *DirHandle) Release(req *fuse.ReleaseRequest, intr fusefs.Intr) (err fuse.Error) {
-	atomic.StorePointer(&this.dirents, unsafe.Pointer(nil))
-	this.fetcher.Forget()
+	this.cache.Unref()
 	return
 }
