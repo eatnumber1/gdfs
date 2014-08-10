@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"syscall"
 	"sync/atomic"
+	"sync"
 	"unsafe"
+	"runtime"
 
 	"github.com/eatnumber1/gdfs/util"
 	"github.com/eatnumber1/gdfs/drive/fetched"
@@ -33,13 +35,20 @@ type Node struct {
 	drive *Drive
 	fetcher fetched.FileValue
 	cache unsafe.Pointer // *HandleCache
+	forgetOnce sync.Once
+}
+
+func finalizeNode(node *Node) {
+	node.forget()
 }
 
 func NewNode(drive *Drive, fileId string) *Node {
-	return &Node{
+	node := &Node{
 		drive: drive,
 		fetcher: fetched.NewFileValue(fileId, drive.service),
 	}
+	runtime.SetFinalizer(node, finalizeNode)
+	return node
 }
 
 func (this *Node) Inode() (uint64, error) {
@@ -52,12 +61,18 @@ func (this *Node) Inode() (uint64, error) {
 	return inode(file.Id), nil
 }
 
-func (this *Node) Forget() {
-	this.fetcher.Forget()
-	cache := (*HandleCache)(atomic.LoadPointer(&this.cache))
-	if cache != nil {
-		(*cache).Unref()
-	}
+// Fuse's forget refers specifically to inode lifetimes, and may be called more
+// than once. See
+// https://github.com/fuse4x/fuse/blob/master/include/fuse_lowlevel.h and
+// http://sourceforge.net/p/fuse/mailman/message/28704209/
+func (this *Node) forget() {
+	this.forgetOnce.Do(func() {
+		this.fetcher.Forget()
+		cache := (*HandleCache)(atomic.LoadPointer(&this.cache))
+		if cache != nil {
+			(*cache).Unref()
+		}
+	})
 }
 
 func (this *Node) Lookup(name string, intr fusefs.Intr) (node fusefs.Node, err fuse.Error) {

@@ -5,6 +5,8 @@ import (
 	"log"
 	"unsafe"
 	"sync/atomic"
+	"sync"
+	"runtime"
 
 	"github.com/eatnumber1/gdfs/util"
 	"github.com/eatnumber1/gdfs/drive/fetched"
@@ -18,6 +20,11 @@ import (
 type DirHandle struct {
 	drive *Drive
 	cache *DirHandleCache
+	releaseOnce sync.Once
+}
+
+func finalizeHandle(handle *DirHandle) {
+	handle.forget()
 }
 
 func NewDirHandleFromFileValue(drive *Drive, fetcher fetched.FileValue, cacheptrptr *unsafe.Pointer) *DirHandle {
@@ -42,10 +49,12 @@ func NewDirHandle(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe.Po
 		cache.Ref()
 	}
 
-	return &DirHandle{
+	handle := &DirHandle{
 		drive: drive,
 		cache: cache,
 	}
+	runtime.SetFinalizer(handle, finalizeHandle)
+	return handle
 }
 
 func (this *DirHandle) ReadDir(intr fusefs.Intr) (dirents []fuse.Dirent, err fuse.Error) {
@@ -117,7 +126,13 @@ func (this *DirHandle) Flush(req *fuse.FlushRequest, intr fusefs.Intr) (err fuse
 	return
 }
 
+func (this *DirHandle) forget() {
+	this.releaseOnce.Do(func() {
+		this.cache.Unref()
+	})
+}
+
 func (this *DirHandle) Release(req *fuse.ReleaseRequest, intr fusefs.Intr) (err fuse.Error) {
-	this.cache.Unref()
+	this.forget()
 	return
 }
