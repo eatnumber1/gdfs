@@ -3,6 +3,8 @@ package fetched
 import (
 	"sync/atomic"
 	"sync"
+	"runtime"
+	"log"
 
 	fuse "bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
@@ -23,10 +25,16 @@ type ValueImpl struct {
 	forget chan struct{}
 	result chan fetcherResult
 
+	isShutdown int32 // bool
+
 	// Only access using atomics
 	fetchOnce *sync.Once
 	fetchOnceLock sync.RWMutex
 	fetchFunc FetchFunc
+}
+
+type ValueRef struct {
+	*ValueImpl
 }
 
 type fetcherResult struct {
@@ -47,11 +55,23 @@ func (this *ValueImpl) Get(intr fusefs.Intr) (interface{}, error) {
 }
 
 func (this *ValueImpl) Done() {
-	close(this.shutdown)
+	v := atomic.SwapInt32(&this.isShutdown, 1)
+	if v == 0 {
+		close(this.shutdown)
+	}
+}
+
+func finalizeImpl(impl *ValueImpl) {
+	log.Printf("finalizeImpl: %p", impl)
+}
+
+func finalizeRef(ref *ValueRef) {
+	ref.Done()
+	log.Printf("finalizeRef: %p", ref)
 }
 
 func NewValue(fetchFunc FetchFunc) Value {
-	return &ValueImpl{
+	impl := &ValueImpl{
 		waiters: 0,
 		intr: make(fusefs.Intr),
 		shutdown: make(chan struct{}),
@@ -59,7 +79,12 @@ func NewValue(fetchFunc FetchFunc) Value {
 		result: make(chan fetcherResult),
 		fetchFunc: fetchFunc,
 		fetchOnce: &sync.Once{},
+		isShutdown: 0,
 	}
+	ref := &ValueRef{ impl }
+	runtime.SetFinalizer(ref, finalizeRef)
+	runtime.SetFinalizer(impl, finalizeImpl)
+	return ref
 }
 
 func (this *ValueImpl) Forget() {
@@ -86,6 +111,7 @@ func (this *ValueImpl) fetch() {
 		close(intrc)
 		return
 	case <-this.shutdown:
+		close(intrc)
 		return
 	case res = <-resc:
 	}
