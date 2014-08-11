@@ -237,11 +237,9 @@ func (this *NodeRef) Reset() {
 }
 
 func (this *NodeRef) getNode() *Node {
-	pt := unsafe.Pointer(this.Node)
-	return ((*Node)(atomic.LoadPointer(&pt)))
+	return ((*Node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&this.Node)))))
 }
 
 func (this *NodeRef) setNode(node *Node) {
-	pt := unsafe.Pointer(this.Node)
-	atomic.StorePointer(&pt, unsafe.Pointer(node))
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.Node)), unsafe.Pointer(node))
 }

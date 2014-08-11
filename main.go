@@ -104,10 +104,7 @@ func main() {
 	}
 
 	//gdfs, err := gdfs.NewDriveFileSystem(svc, transport.Client())
-	gdfs, err := drive.NewDriveRef(svc, transport.Client())
-	if err != nil {
-		log.Fatalf("Cannot construct Drive file system: %v\n", err)
-	}
+	gdfs := drive.NewDriveRef(svc, transport.Client())
 
 	c, err := fuse.Mount(mountpoint)
 	if err != nil {

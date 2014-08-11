@@ -123,11 +123,9 @@ func (this *DirHandleRef) Reset() {
 }
 
 func (this *DirHandleRef) getHandle() *DirHandle {
-	pt := unsafe.Pointer(this.DirHandle)
-	return ((*DirHandle)(atomic.LoadPointer(&pt)))
+	return ((*DirHandle)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&this.DirHandle)))))
 }
 
 func (this *DirHandleRef) setHandle(handle *DirHandle) {
-	pt := unsafe.Pointer(this.DirHandle)
-	atomic.StorePointer(&pt, unsafe.Pointer(handle))
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.DirHandle)), unsafe.Pointer(handle))
 }

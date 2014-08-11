@@ -33,13 +33,12 @@ type Drive struct {
 }
 
 // TODO: Construct the service ourselves.
-func NewDrive(svc *gdrive.Service, client *http.Client) (drive *Drive, err error) {
-	drive = &Drive{
+func NewDrive(svc *gdrive.Service, client *http.Client) *Drive {
+	return &Drive{
 		service: svc,
 		client: client,
 		aboutFetcher: fetched.NewAboutValue(svc),
 	}
-	return
 }
 
 func (this *Drive) Root() (node fusefs.Node, err fuse.Error) {
@@ -93,39 +92,27 @@ func (this *Drive) GenerateInode(parentInode uint64, name string) uint64 {
 
 type DriveRef struct {
 	*Drive
-	newDrive func() (*Drive, error)
+	newDrive func() *Drive
 }
 
-func NewDriveRef(svc *gdrive.Service, client *http.Client) (*DriveRef, error) {
-	newDrive := func() (drive *Drive, err error) {
+func NewDriveRef(svc *gdrive.Service, client *http.Client) *DriveRef {
+	newDrive := func() *Drive {
 		return NewDrive(svc, client)
 	}
 
-	drive, err := newDrive()
-	if err != nil {
-		return nil, err
-	}
-
-	return &DriveRef{ drive, newDrive }, nil
+	return &DriveRef{ newDrive(), newDrive }
 }
 
-func (this *DriveRef) Reset() (err error) {
-	drive, err := this.newDrive()
-	if err != nil {
-		return
-	}
-	this.setDrive(drive)
-	return
+func (this *DriveRef) Reset() {
+	this.setDrive(this.newDrive())
 }
 
 func (this *DriveRef) getDrive() *Drive {
-	pt := unsafe.Pointer(this.Drive)
-	return ((*Drive)(atomic.LoadPointer(&pt)))
+	return ((*Drive)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&this.Drive)))))
 }
 
 func (this *DriveRef) setDrive(drive *Drive) {
-	pt := unsafe.Pointer(this.Drive)
-	atomic.StorePointer(&pt, unsafe.Pointer(drive))
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.Drive)), unsafe.Pointer(drive))
 }
 
 /*
