@@ -8,6 +8,8 @@ import (
 	"sort"
 	"log"
 	"net/http"
+	"unsafe"
+	"sync/atomic"
 
 	"github.com/eatnumber1/gdfs/util"
 	"github.com/eatnumber1/gdfs/drive/fetched"
@@ -46,11 +48,11 @@ func (this *Drive) Root() (node fusefs.Node, err fuse.Error) {
 		err = util.FuseErrorOrFatalf(err)
 		return
 	}
-	node = NewNode(this, about.RootFolderId)
+	node = NewNodeRef(this, about.RootFolderId)
 	return
 }
 
-func (this Drive) Statfs(req *fuse.StatfsRequest, resp *fuse.StatfsResponse, intr fusefs.Intr) (err fuse.Error) {
+func (this *Drive) Statfs(req *fuse.StatfsRequest, resp *fuse.StatfsResponse, intr fusefs.Intr) (err fuse.Error) {
 	if req.Node != 1 {
 		panic("Unknown node for statfs")
 	}
@@ -79,7 +81,7 @@ func (this *Drive) GenerateInode(parentInode uint64, name string) uint64 {
 			log.Fatalf("GenerateInode(): error fetching root: %v", err)
 			return ^uint64(0)
 		}
-		inode, err := node.(*Node).Inode()
+		inode, err := node.(*NodeRef).Inode()
 		if err != nil {
 			log.Fatalf("GenerateInode(): error fetching inode: %v", err)
 			return ^uint64(0)
@@ -87,6 +89,43 @@ func (this *Drive) GenerateInode(parentInode uint64, name string) uint64 {
 		return inode
 	}
 	panic(fmt.Sprintf("GenerateInode(%v, %v)", parentInode, name))
+}
+
+type DriveRef struct {
+	*Drive
+	newDrive func() (*Drive, error)
+}
+
+func NewDriveRef(svc *gdrive.Service, client *http.Client) (*DriveRef, error) {
+	newDrive := func() (drive *Drive, err error) {
+		return NewDrive(svc, client)
+	}
+
+	drive, err := newDrive()
+	if err != nil {
+		return nil, err
+	}
+
+	return &DriveRef{ drive, newDrive }, nil
+}
+
+func (this *DriveRef) Reset() (err error) {
+	drive, err := this.newDrive()
+	if err != nil {
+		return
+	}
+	this.setDrive(drive)
+	return
+}
+
+func (this *DriveRef) getDrive() *Drive {
+	pt := unsafe.Pointer(this.Drive)
+	return ((*Drive)(atomic.LoadPointer(&pt)))
+}
+
+func (this *DriveRef) setDrive(drive *Drive) {
+	pt := unsafe.Pointer(this.Drive)
+	atomic.StorePointer(&pt, unsafe.Pointer(drive))
 }
 
 /*

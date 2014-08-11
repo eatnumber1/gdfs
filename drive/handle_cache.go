@@ -1,6 +1,3 @@
 package drive
 
-type HandleCache interface {
-	Ref()
-	Unref()
-}
+type HandleCache interface {}

@@ -8,8 +8,8 @@ type ReferenceCount struct {
 	refcnt uint64
 }
 
-func NewReferenceCount() *ReferenceCount {
-	return &ReferenceCount{ 1 }
+func NewReferenceCount() ReferenceCount {
+	return ReferenceCount{ 1 }
 }
 
 func (this *ReferenceCount) Ref() {

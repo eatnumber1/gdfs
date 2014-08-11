@@ -13,14 +13,12 @@ type FetchFunc func(fusefs.Intr) (interface{}, error)
 
 type Value interface {
 	Get(fusefs.Intr) (interface{}, error)
-	Forget()
 }
 
 type valueImpl struct {
 	waiters int64
 	intr fusefs.Intr
 	shutdown chan struct{}
-	forget chan struct{}
 	result chan fetcherResult
 
 	isShutdown int32 // bool
@@ -69,7 +67,6 @@ func NewValue(fetchFunc FetchFunc) Value {
 		waiters: 0,
 		intr: make(fusefs.Intr),
 		shutdown: make(chan struct{}),
-		forget: make(chan struct{}, 1),
 		result: make(chan fetcherResult),
 		fetchFunc: fetchFunc,
 		fetchOnce: &sync.Once{},
@@ -78,10 +75,6 @@ func NewValue(fetchFunc FetchFunc) Value {
 	ref := &valueRef{ impl }
 	runtime.SetFinalizer(ref, finalizeRef)
 	return ref
-}
-
-func (this *valueImpl) Forget() {
-	this.forget <- struct{}{}
 }
 
 func (this *valueImpl) fetch() {
@@ -112,9 +105,6 @@ func (this *valueImpl) fetch() {
 	for {
 		select {
 		case <-this.shutdown:
-			return
-		case <-this.forget:
-			this.resetFetchOnce()
 			return
 		case this.result <- res:
 		}

@@ -13,7 +13,7 @@ type DirValue interface {
 }
 
 type DirValueImpl struct {
-	file FileValue
+	FileValue
 	contents Value
 }
 
@@ -47,8 +47,8 @@ func NewDirValueFromFileValue(fileValue FileValue, service *gdrive.Service) DirV
 	}
 
 	return &DirValueImpl{
-		file: fileValue,
-		contents: NewValue(fetchFunc),
+		fileValue,
+		NewValue(fetchFunc),
 	}
 }
 
@@ -62,18 +62,3 @@ func (this *DirValueImpl) List(intr fusefs.Intr) (list []FileValue, err error) {
 	list = l.([]FileValue)
 	return
 }
-
-func (this *DirValueImpl) File(intr fusefs.Intr) (*gdrive.File, error) {
-	return this.file.File(intr)
-}
-
-func (this *DirValueImpl) Get(intr fusefs.Intr) (interface{}, error) {
-	return this.file.Get(intr)
-}
-
-func (this *DirValueImpl) Forget() {
-	this.file.Forget()
-	this.contents.Forget()
-}
-
-// TODO: Correctly forget

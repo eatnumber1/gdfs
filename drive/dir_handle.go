@@ -5,8 +5,6 @@ import (
 	"log"
 	"unsafe"
 	"sync/atomic"
-	"sync"
-	"runtime"
 
 	"github.com/eatnumber1/gdfs/util"
 	"github.com/eatnumber1/gdfs/drive/fetched"
@@ -20,15 +18,6 @@ import (
 type DirHandle struct {
 	drive *Drive
 	cache *DirHandleCache
-	releaseOnce sync.Once
-}
-
-func finalizeHandle(handle *DirHandle) {
-	handle.forget()
-}
-
-func NewDirHandleFromFileValue(drive *Drive, fetcher fetched.FileValue, cacheptrptr *unsafe.Pointer) *DirHandle {
-	return NewDirHandle(drive, fetched.NewDirValueFromFileValue(fetcher, drive.service), cacheptrptr)
 }
 
 func NewDirHandle(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe.Pointer) *DirHandle {
@@ -37,24 +26,16 @@ func NewDirHandle(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe.Po
 	var cache *DirHandleCache
 	if cacheptr != nil {
 		cache = (*(*HandleCache)(cacheptr)).(*DirHandleCache)
-		cache.Ref()
 	} else {
 		cache = NewDirHandleCache(fetcher)
 		var handleCache HandleCache = cache
-		old := atomic.SwapPointer(cacheptrptr, unsafe.Pointer(&handleCache))
-		if old != nil {
-			(*((*HandleCache)(old))).Unref()
-		}
-		// Ref() for the node
-		cache.Ref()
+		atomic.StorePointer(cacheptrptr, unsafe.Pointer(&handleCache))
 	}
 
-	handle := &DirHandle{
+	return &DirHandle{
 		drive: drive,
 		cache: cache,
 	}
-	runtime.SetFinalizer(handle, finalizeHandle)
-	return handle
 }
 
 func (this *DirHandle) ReadDir(intr fusefs.Intr) (dirents []fuse.Dirent, err fuse.Error) {
@@ -122,17 +103,31 @@ func (this *DirHandle) ReadDir(intr fusefs.Intr) (dirents []fuse.Dirent, err fus
 	return
 }
 
-func (this *DirHandle) Flush(req *fuse.FlushRequest, intr fusefs.Intr) (err fuse.Error) {
-	return
+// -- DirHandleRef
+
+type DirHandleRef struct {
+	*DirHandle
+	newHandle func() *DirHandle
 }
 
-func (this *DirHandle) forget() {
-	this.releaseOnce.Do(func() {
-		this.cache.Unref()
-	})
+// TODO: cacheptrptr won't work here anymore
+func NewDirHandleRef(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe.Pointer) *DirHandleRef {
+	newHandle := func() *DirHandle {
+		return NewDirHandle(drive, fetcher, cacheptrptr)
+	}
+	return &DirHandleRef{ newHandle(), newHandle }
 }
 
-func (this *DirHandle) Release(req *fuse.ReleaseRequest, intr fusefs.Intr) (err fuse.Error) {
-	this.forget()
-	return
+func (this *DirHandleRef) Reset() {
+	this.setHandle(this.newHandle())
+}
+
+func (this *DirHandleRef) getHandle() *DirHandle {
+	pt := unsafe.Pointer(this.DirHandle)
+	return ((*DirHandle)(atomic.LoadPointer(&pt)))
+}
+
+func (this *DirHandleRef) setHandle(handle *DirHandle) {
+	pt := unsafe.Pointer(this.DirHandle)
+	atomic.StorePointer(&pt, unsafe.Pointer(handle))
 }
