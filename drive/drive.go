@@ -104,15 +104,7 @@ func NewDriveRef(svc *gdrive.Service, client *http.Client) *DriveRef {
 }
 
 func (this *DriveRef) Reset() {
-	this.setDrive(this.newDrive())
-}
-
-func (this *DriveRef) getDrive() *Drive {
-	return ((*Drive)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&this.Drive)))))
-}
-
-func (this *DriveRef) setDrive(drive *Drive) {
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.Drive)), unsafe.Pointer(drive))
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.Drive)), unsafe.Pointer(this.newDrive()))
 }
 
 /*

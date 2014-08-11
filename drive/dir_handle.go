@@ -119,13 +119,5 @@ func NewDirHandleRef(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe
 }
 
 func (this *DirHandleRef) Reset() {
-	this.setHandle(this.newHandle())
-}
-
-func (this *DirHandleRef) getHandle() *DirHandle {
-	return ((*DirHandle)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&this.DirHandle)))))
-}
-
-func (this *DirHandleRef) setHandle(handle *DirHandle) {
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.DirHandle)), unsafe.Pointer(handle))
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.DirHandle)), unsafe.Pointer(this.newHandle()))
 }

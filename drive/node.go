@@ -233,13 +233,5 @@ func NewNodeRef(drive *Drive, fileId string) *NodeRef {
 }
 
 func (this *NodeRef) Reset() {
-	this.setNode(this.newNode())
-}
-
-func (this *NodeRef) getNode() *Node {
-	return ((*Node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&this.Node)))))
-}
-
-func (this *NodeRef) setNode(node *Node) {
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.Node)), unsafe.Pointer(node))
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&this.Node)), unsafe.Pointer(this.newNode()))
 }
