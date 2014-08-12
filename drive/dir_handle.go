@@ -20,16 +20,15 @@ type DirHandle struct {
 	cache *DirHandleCache
 }
 
-func NewDirHandle(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe.Pointer) *DirHandle {
+func NewDirHandle(drive *Drive, fetcher fetched.DirValue, cacheStore CacheStorage) *DirHandle {
 	// This is slightly racy. Meh
-	cacheptr := atomic.LoadPointer(cacheptrptr)
+	handleCache := cacheStore.GetCache()
 	var cache *DirHandleCache
-	if cacheptr != nil {
-		cache = (*(*HandleCache)(cacheptr)).(*DirHandleCache)
+	if handleCache != nil {
+		cache = handleCache.(*DirHandleCache)
 	} else {
 		cache = NewDirHandleCache(fetcher)
-		var handleCache HandleCache = cache
-		atomic.StorePointer(cacheptrptr, unsafe.Pointer(&handleCache))
+		cacheStore.SetCache(cache)
 	}
 
 	return &DirHandle{
@@ -111,9 +110,9 @@ type DirHandleRef struct {
 }
 
 // TODO: cacheptrptr won't work here anymore
-func NewDirHandleRef(drive *Drive, fetcher fetched.DirValue, cacheptrptr *unsafe.Pointer) *DirHandleRef {
+func NewDirHandleRef(drive *Drive, fetcher fetched.DirValue, cache CacheStorage) *DirHandleRef {
 	newHandle := func() *DirHandle {
-		return NewDirHandle(drive, fetcher, cacheptrptr)
+		return NewDirHandle(drive, fetcher, cache)
 	}
 	return &DirHandleRef{ newHandle(), newHandle }
 }

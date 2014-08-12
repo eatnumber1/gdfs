@@ -35,6 +35,11 @@ type Node struct {
 	cache unsafe.Pointer // *HandleCache
 }
 
+type CacheStorage interface {
+	GetCache() HandleCache
+	SetCache(HandleCache)
+}
+
 func NewNode(drive *Drive, fileId string) *Node {
 	return &Node{
 		drive: drive,
@@ -176,6 +181,18 @@ func (this *Node) Attr() fuse.Attr {
 	return response.Attr
 }
 
+func (this *Node) GetCache() HandleCache {
+	ptr := ((*HandleCache)(atomic.LoadPointer(&this.cache)))
+	if ptr == nil {
+		return nil
+	}
+	return *ptr
+}
+
+func (this *Node) SetCache(cache HandleCache) {
+	atomic.StorePointer(&this.cache, unsafe.Pointer(&cache))
+}
+
 // TODO: Properly handle req.Flags and set resp.Flags
 func (this *Node) Open(req *fuse.OpenRequest, resp *fuse.OpenResponse, intr fusefs.Intr) (handle fusefs.Handle, err fuse.Error) {
 	mode, err := this.mode(intr)
@@ -194,7 +211,7 @@ func (this *Node) Open(req *fuse.OpenRequest, resp *fuse.OpenResponse, intr fuse
 	}
 
 	if req.Dir {
-		handle = NewDirHandle(this.drive, fetched.NewDirValueFromFileValue(this.fetcher, this.drive.service), &this.cache)
+		handle = NewDirHandle(this.drive, fetched.NewDirValueFromFileValue(this.fetcher, this.drive.service), this)
 	} else {
 		err = fuse.EIO
 		return
@@ -202,7 +219,7 @@ func (this *Node) Open(req *fuse.OpenRequest, resp *fuse.OpenResponse, intr fuse
 	return
 }
 
-func (this Node) mode(intr fusefs.Intr) (ret os.FileMode, err error) {
+func (this *Node) mode(intr fusefs.Intr) (ret os.FileMode, err error) {
 	file, err := this.fetcher.File(intr)
 	if err != nil {
 		err = util.FuseErrorOrFatalf(err)
