@@ -1,0 +1,4 @@
+*.[ao]
+.*.sw[op]
+Cargo.lock
+target

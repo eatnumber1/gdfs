@@ -1,0 +1,23 @@
+[project]
+name = "gdfs"
+version = "0.0.1"
+authors = ["Russell Harmon <eatnumber1@gmail.com>",
+           "William Orr <will@worrbase.com>"]
+
+[dependencies]
+getopts = "*"
+
+[dependencies.regex]
+version = "*"
+features = ["pattern"]
+
+[dependencies.fuse]
+git = "https://github.com/zargony/rust-fuse.git"
+
+[dependencies.google-drive2]
+git = "https://github.com/Byron/google-apis-rs.git"
+
+[[bin]]
+name = "mount_gdfs"
+test = false
+doc = false
